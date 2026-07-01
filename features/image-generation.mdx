@@ -1,0 +1,146 @@
+---
+title: "AI Image Generation with Flux-1-Schnell"
+sidebarTitle: "Image Generation"
+description: "Generate stunning AI images from text prompts using Cloudflare Workers AI's Flux-1-Schnell model, with automatic Cloudinary hosting and one-click community sharing."
+---
+
+The image generation feature is the creative core of Akari Art. Authenticated users describe a scene, subject, or mood in plain text, and the app transforms that prompt into a unique image via Cloudflare Workers AI's **Flux-1-Schnell** model. The resulting image is automatically uploaded to Cloudinary, and the hosted URL is returned to the browser for instant preview — no local file handling required.
+
+## How it works
+
+<Steps>
+  <Step title="Enter a text prompt on the Create page">
+    Navigate to `/create` and type a description of the image you want to generate. The prompt field accepts between **10 and 500 characters**. A live character counter in the bottom-right corner of the textarea tracks your input. The **Artwork Name** field is pre-filled with your account display name and cannot be edited.
+  </Step>
+  <Step title="Client POSTs to /api/image-generation">
+    Clicking **Generate Image** triggers `handleGenerate`, which validates the form and then sends a `POST` request with your prompt to the `/api/image-generation` route:
+
+    ```tsx
+    const { data } = await axios.post(`${BASE_URL}/api/image-generation`, {
+      prompt,
+    });
+    setGeneratedImage(data?.photo);
+    ```
+
+    A pulsing skeleton loader with a spinner replaces the empty preview area while the request is in flight.
+  </Step>
+  <Step title="Server calls Cloudflare Workers AI Flux-1-Schnell">
+    The API route forwards the prompt directly to the Cloudflare Workers AI endpoint for the `@cf/black-forest-labs/flux-1-schnell` model, authenticated with your account credentials:
+
+    ```ts
+    const response = await axios.post(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+      { prompt },
+      {
+        headers: {
+          Authorization: `Bearer ${CLOUDFLARE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    ```
+
+    If `response.data.success` is `false`, the route returns a `500` error immediately.
+  </Step>
+  <Step title="Base64 image is uploaded to Cloudinary">
+    Cloudflare returns the generated image as a base64 string. The server decodes it and uploads it directly to Cloudinary:
+
+    ```ts
+    const base64Image = response.data.result.image;
+    const photoUrl = await cloudinary.uploader.upload(
+      `data:image/png;base64,${base64Image}`
+    );
+    ```
+  </Step>
+  <Step title="Cloudinary secure_url is returned and displayed">
+    The route returns the Cloudinary `secure_url` as `photo`:
+
+    ```ts
+    return NextResponse.json({ photo: photoUrl.secure_url }, { status: 200 });
+    ```
+
+    The client stores this URL in state and renders it in the preview panel using Next.js `<Image>`. The image will persist at this URL even after navigating away.
+  </Step>
+</Steps>
+
+## Writing effective prompts
+
+The textarea placeholder reads *"Describe your vision in detail... Be creative and specific!"* — and that's genuine advice. Flux-1-Schnell responds well to precise, layered descriptions.
+
+<Accordion title="Specificity">
+  Vague prompts yield generic results. Instead of *"a cat"*, try *"a fluffy ginger tabby cat sitting on a rain-soaked windowsill at dusk"*. The more concrete details you provide — species, color, setting, time of day — the closer the output matches your intent.
+</Accordion>
+
+<Accordion title="Style and medium">
+  Append an artistic style to steer the aesthetic. Examples include *"oil painting"*, *"photorealistic 4K render"*, *"watercolor illustration"*, *"charcoal sketch"*, or *"Studio Ghibli animation style"*. Naming a specific artist or movement (e.g., *"in the style of Monet"*) also works.
+</Accordion>
+
+<Accordion title="Lighting and atmosphere">
+  Lighting dramatically changes the mood of an image. Phrases like *"golden hour lighting"*, *"dramatic chiaroscuro"*, *"soft diffused studio light"*, or *"neon-lit night scene"* give the model clear direction on how to illuminate the subject.
+</Accordion>
+
+<Accordion title="Composition and framing">
+  Guide the camera angle or framing: *"close-up portrait"*, *"wide-angle landscape"*, *"bird's-eye view"*, *"symmetrical composition"*, or *"rule-of-thirds framing"*. Adding depth cues like *"foreground bokeh"* or *"distant misty mountains"* adds realism.
+</Accordion>
+
+<Tip>
+  Combine all four dimensions into one prompt for the best results. For example: *"A lone lighthouse on a rocky cliff, dramatic stormy sky, crashing ocean waves, photorealistic render, cinematic wide-angle shot, golden-hour warm light breaking through dark clouds."*
+</Tip>
+
+## Validation rules
+
+Before the request is sent, `validateForm` runs client-side checks on the prompt field:
+
+| Rule | Condition | Error message |
+|---|---|---|
+| Required | `prompt.trim()` is empty | `"Prompt is required"` |
+| Minimum length | `prompt.trim().length < 10` | `"Prompt must be at least 10 characters long"` |
+
+Errors are displayed inline beneath the textarea with a red border and an alert icon. Correcting the field clears the error immediately on the next keystroke.
+
+```tsx
+const validateForm = () => {
+  const newErrors: { prompt?: string } = {};
+
+  if (!prompt.trim()) {
+    newErrors.prompt = "Prompt is required";
+  } else if (prompt.trim().length < 10) {
+    newErrors.prompt = "Prompt must be at least 10 characters long";
+  }
+
+  setErrors(newErrors);
+  return Object.keys(newErrors).length === 0;
+};
+```
+
+## Sharing generated images
+
+Once an image has been generated, a **Share with Community** button appears below the preview. Clicking it calls `handleShare`, which POSTs the user's name, the original prompt, and the Cloudinary image URL to `/api/post`:
+
+```tsx
+const handleShare = async () => {
+  setIsSharing(true);
+  if (name && prompt && generatedImage) {
+    try {
+      const { data } = await axios.post(`${BASE_URL}/api/post`, {
+        name,
+        prompt,
+        photo: generatedImage,
+      });
+      toast("Shared with Community");
+      router.push("/community");
+    } catch (error) {
+      console.error("Share failed:", error);
+      toast("Share failed");
+    } finally {
+      setIsSharing(false);
+    }
+  }
+};
+```
+
+On success, a toast notification confirms the share and the user is redirected to `/community` where the new post appears at the top of the grid (posts are displayed in reverse-chronological order).
+
+<Note>
+  Image generation and sharing both require authentication. The `/create` page calls `getServerSession` on the server; unauthenticated visitors are redirected to `/signin` before the `ImageGenerator` component ever renders. See [Authentication](/features/authentication) for details on the session and middleware setup.
+</Note>

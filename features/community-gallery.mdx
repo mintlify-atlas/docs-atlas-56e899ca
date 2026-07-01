@@ -1,0 +1,145 @@
+---
+title: "Community Gallery: Discover Shared AI Art"
+sidebarTitle: "Community Gallery"
+description: "Browse, search, and download AI-generated artwork shared by every Akari Art user, displayed in a responsive masonry-style grid with prompt overlays and one-click saving."
+---
+
+The Community Gallery at `/community` is a shared, living feed of every image that any Akari Art user has chosen to publish. Posts are loaded directly from MongoDB on the server, reversed into newest-first order, and rendered into a responsive grid — no pagination or infinite scroll, just a clean snapshot of the community's creativity. From any card you can read the original prompt, see who created the piece, and save a copy to your device.
+
+## Browsing posts
+
+Posts are displayed in a **responsive CSS grid** that adapts to the viewer's screen size:
+
+| Breakpoint | Columns |
+|---|---|
+| Default (mobile) | 1 column |
+| `sm` (≥ 640 px) | 3 columns |
+| `lg` (≥ 1024 px) | 4 columns |
+
+The grid is declared in the community page layout:
+
+```tsx
+<div className="grid lg:grid-cols-4 sm:grid-cols-3 grid-cols-1 gap-5">
+  <RenderPosts
+    data={posts}
+    title={search ? "No results found" : "No posts found"}
+  />
+</div>
+```
+
+`RenderPosts` maps each post document to a `<Card>` component, passing `name`, `prompt`, and `photo` as props. If the `posts` array is empty (either no posts exist or a search returned nothing), `RenderPosts` renders a prominent heading with the `title` string instead.
+
+**Post ordering** — all posts are fetched with `Post.find({}).lean()` and then `.reverse()` is called on the result array, so the most recently created post always appears in the top-left position of the grid.
+
+## Card behavior
+
+Each `<Card>` shows the Cloudinary-hosted image filling the card area. On top of the image sits an **overlay panel** that reveals the prompt text, the creator's name (with an avatar initial badge), and a download button.
+
+<CardGroup cols={2}>
+  <Card title="Desktop hover" icon="desktop">
+    On screens wider than 768 px, the overlay slides into view whenever the cursor enters the card, using the Tailwind `group-hover:flex` utility. No click is needed.
+  </Card>
+  <Card title="Mobile tap" icon="mobile">
+    On screens narrower than 768 px, the overlay is toggled by tapping the card. A second tap dismisses it. This is handled by the `toggleOverlay` function, which checks `window.innerWidth` before updating the `showOverlay` state.
+  </Card>
+</CardGroup>
+
+```tsx
+const toggleOverlay = () => {
+  if (window.innerWidth < 768) {
+    setShowOverlay(!showOverlay);
+  }
+};
+```
+
+The overlay panel is conditionally rendered using both the local `showOverlay` state (mobile tap) and the CSS `group-hover:flex` class (desktop hover):
+
+```tsx
+<div
+  className={`${
+    showOverlay ? "flex" : "hidden"
+  } group-hover:flex flex-col max-h-[94.5%] absolute bottom-0 left-0 right-0 bg-[#10131f] m-2 p-4 rounded-md`}
+>
+  <p className="text-white text-sm overflow-y-auto prompt">{prompt}</p>
+  <div className="mt-5 flex justify-between items-center gap-2">
+    <div className="flex items-center gap-2">
+      <div className="w-7 h-7 rounded-full object-cover bg-green-700 flex justify-center items-center text-white text-xs font-bold">
+        {name[0]}
+      </div>
+      <p className="text-white text-sm">{name}</p>
+    </div>
+    {/* Download button */}
+  </div>
+</div>
+```
+
+## Search
+
+The gallery supports full-text filtering via a native HTML `<form>` that issues a `GET` request, appending a `search` query parameter to the `/community` URL:
+
+```tsx
+<form
+  className="flex dark w-full items-center mx-auto gap-2"
+  action="/community"
+  method="GET"
+>
+  <Input
+    type="text"
+    name="search"
+    placeholder="Search..."
+    className="w-full"
+    defaultValue={search}
+  />
+  <Button type="submit" variant="secondary">
+    Search
+  </Button>
+</form>
+```
+
+On the server, the page reads the `search` parameter from `searchParams` and filters the already-reversed posts array:
+
+```ts
+if (search) {
+  posts = posts.filter(
+    (post) =>
+      post.name.toLowerCase().includes(search) ||
+      post.prompt.toLowerCase().includes(search)
+  );
+}
+```
+
+The filter is **case-insensitive** and matches against both the creator's **name** and the image **prompt**. Partial matches are supported — searching for `"cat"` will match any post whose name or prompt contains that substring anywhere.
+
+When a search is active, a result label appears above the grid:
+
+```
+Search results for <query>
+```
+
+If nothing matches, the `RenderPosts` component renders `"No results found"` in place of the grid.
+
+<Tip>
+  The current URL updates with each search (e.g. `/community?search=sunset`), so search results are fully shareable and bookmarkable via the browser address bar.
+</Tip>
+
+## Downloading images
+
+Every card overlay includes a download button powered by the [`file-saver`](https://github.com/eligrey/FileSaver.js) library. Clicking it saves the Cloudinary-hosted image to the user's device as `downloaded-image.png`:
+
+```tsx
+<button
+  className="outline-none bg-transparent cursor-pointer border-none"
+  onClick={(e) => {
+    e.stopPropagation(); // Prevent closing overlay on download
+    saveAs(photo, `downloaded-image.png`);
+  }}
+>
+  <Download />
+</button>
+```
+
+`e.stopPropagation()` ensures the click does not bubble up to the card's `onClick` handler, which would toggle the overlay closed on mobile immediately after the download is initiated.
+
+<Note>
+  The Community Gallery requires authentication. Unauthenticated users who visit `/community` are redirected to `/signin` by the server-side session check in the page component. See [Authentication](/features/authentication) for details on how protected routes are enforced.
+</Note>

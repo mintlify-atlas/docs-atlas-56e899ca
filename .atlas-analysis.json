@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Akari Art",
+  "projectType": "saas",
+  "projectName": "Akari Art",
+  "projectDescription": "Akari Art is an AI-powered image generation web app that lets authenticated users create artwork from text prompts and share creations with a community gallery.",
   "theme": "willow",
-  "colors": {
-    "primary": "#7C3AED",
-    "light": "#a78bfa",
-    "dark": "#4c1d95"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/nayalsaurav/Akari-Art"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/nayalsaurav/Akari-Art"
-    }
-  },
+  "primaryColor": "#7C3AED",
+  "lightColor": "#a78bfa",
+  "darkColor": "#4c1d95",
   "navigation": {
     "tabs": [
       {
@@ -71,5 +59,22 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "AI image generation via Cloudflare Workers AI (Flux-1-Schnell model)",
+    "Google OAuth authentication with NextAuth.js",
+    "Community gallery for sharing and discovering AI-generated artwork",
+    "Image hosting and storage via Cloudinary",
+    "MongoDB persistence for posts and user accounts",
+    "Prompt-based search across community posts",
+    "One-click image download from the community feed",
+    "Protected routes with JWT-based session middleware"
+  ],
+  "publicApiSurface": [
+    "POST /api/image-generation — generate image from text prompt",
+    "GET /api/post — retrieve all community posts",
+    "POST /api/post — create and publish a new post",
+    "GET /api/auth/[...nextauth] — NextAuth.js OAuth endpoints",
+    "POST /api/auth/[...nextauth] — NextAuth.js sign-in callback"
+  ]
 }

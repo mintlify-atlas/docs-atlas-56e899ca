@@ -1,0 +1,61 @@
+---
+title: "Akari Art: AI Image Generation for Everyone"
+sidebarTitle: "Introduction"
+description: "Akari Art turns text prompts into images via Cloudflare's Flux-1-Schnell model, stores results in Cloudinary, and displays them in a community gallery."
+---
+
+Akari Art is a full-stack AI image generation platform built on Next.js 15. Type a text prompt, and Akari Art calls Cloudflare Workers AI's **Flux-1-Schnell** model to produce a high-quality image in seconds. Every generated image is automatically uploaded to Cloudinary, persisted in MongoDB, and made available in a shared community gallery — all behind secure Google OAuth authentication provided by NextAuth.js.
+
+Whether you are a designer exploring AI-assisted creativity, a developer learning how to wire together modern AI infrastructure, or a hobbyist who wants to create and share art without managing complex tooling, Akari Art gives you a polished, production-ready starting point.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card
+    title="AI Image Generation"
+    icon="wand-magic-sparkles"
+    href="/quickstart"
+  >
+    Generate images from natural-language prompts using Cloudflare Workers AI and the Flux-1-Schnell model. Results are returned as base64 and instantly uploaded to Cloudinary.
+  </Card>
+  <Card
+    title="Community Gallery"
+    icon="images"
+    href="/quickstart"
+  >
+    Every published image lands in a shared gallery. Browse, explore, and draw inspiration from creations made by the entire community — all served via Cloudinary's CDN.
+  </Card>
+  <Card
+    title="Google Authentication"
+    icon="google"
+    href="/environment-setup"
+  >
+    NextAuth.js v4 handles sign-in and session management with Google OAuth. New users are automatically provisioned in MongoDB on first login — no manual registration needed.
+  </Card>
+  <Card
+    title="Cloud Storage"
+    icon="cloud"
+    href="/environment-setup"
+  >
+    Generated images are stored on Cloudinary and referenced by URL in MongoDB. Next.js is configured to serve images directly from `res.cloudinary.com` with no additional proxy setup.
+  </Card>
+</CardGroup>
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 15 (App Router + Turbopack) |
+| Auth | NextAuth.js v4 + Google OAuth 2.0 |
+| AI Model | Cloudflare Workers AI — `@cf/black-forest-labs/flux-1-schnell` |
+| Image Storage | Cloudinary v2 SDK |
+| Database | MongoDB via Mongoose v8 |
+| UI | Tailwind CSS v4 + Radix UI + Lucide React |
+
+## Architecture Overview
+
+When a user submits a prompt, the Next.js API route at `/api/image-generation` forwards the request — together with the Cloudflare Account ID and Bearer token — to the Workers AI REST endpoint. Cloudflare returns a base64-encoded PNG, which is immediately uploaded to Cloudinary using the Node.js SDK. The resulting `secure_url` is stored in MongoDB alongside the prompt and the author's user ID (resolved from the JWT session managed by NextAuth.js). The middleware layer uses `withAuth` from `next-auth/middleware` to protect every route except the landing page (`/`), the sign-in page (`/signin`), and the NextAuth callback routes (`/api/auth/*`).
+
+<Note>
+  Running Akari Art locally requires a Google account (for OAuth sign-in) and valid credentials for MongoDB, Cloudinary, and Cloudflare Workers AI. All secrets are read exclusively from environment variables — see the [Environment Setup](/environment-setup) page for step-by-step instructions on obtaining and configuring each one.
+</Note>

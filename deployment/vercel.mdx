@@ -1,0 +1,162 @@
+---
+title: "Deploy Akari Art to Vercel — Step-by-Step Guide"
+sidebarTitle: "Vercel"
+description: "Deploy your Akari Art application to Vercel in minutes. Covers project import, all 11 environment variables, OAuth callback setup, and post-deployment verification."
+---
+
+Vercel is the recommended hosting platform for Akari Art. Because the project is built on Next.js 15, Vercel auto-detects the framework, handles the `next build` step, and provides edge-optimized delivery with zero additional configuration. The guide below walks through every step from pushing your code to verifying the live sign-in flow.
+
+## Prerequisites
+
+Make sure the following external services are fully configured before deploying. Each one contributes one or more environment variables that Vercel needs at build and runtime.
+
+- **Vercel account** — [vercel.com](https://vercel.com) (free tier is sufficient)
+- **GitHub repository** — your fork or clone of Akari Art pushed to a GitHub account
+- **MongoDB Atlas cluster** — connection string ready (see [MongoDB Atlas docs](https://www.mongodb.com/docs/atlas/))
+- **Cloudinary account** — cloud name, API key, and API secret from your Cloudinary dashboard
+- **Cloudflare account** — account ID and an API token with the **AI Run** permission enabled
+- **Google Cloud project** — OAuth 2.0 client ID and secret, with the app in a ready-to-update state
+
+---
+
+## Deploy Steps
+
+<Steps>
+
+<Step title="Push your repository to GitHub">
+Make sure your local clone is pushed to a GitHub repository. Vercel imports directly from GitHub, so the repo must be accessible from your Vercel account.
+
+```bash
+git add .
+git commit -m "Initial Akari Art deployment"
+git push origin main
+```
+</Step>
+
+<Step title="Create a new Vercel project">
+1. Log in to [vercel.com/dashboard](https://vercel.com/dashboard).
+2. Click **Add New → Project**.
+3. Under **Import Git Repository**, find your Akari Art repo and click **Import**.
+
+Vercel automatically detects the **Next.js** framework preset — no manual selection is needed.
+</Step>
+
+<Step title="Verify the framework preset">
+In the project configuration screen confirm the following defaults:
+
+| Setting | Value |
+|---|---|
+| Framework Preset | **Next.js** |
+| Build Command | `next build` |
+| Output Directory | `.next` |
+| Install Command | `npm install` |
+
+Leave these at their defaults. Do **not** override the build command.
+</Step>
+
+<Step title="Add all environment variables">
+Before clicking **Deploy**, expand the **Environment Variables** section and add all 11 variables. Use the exact names shown below — any typo will cause a runtime error.
+
+| Variable | Example Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | `123456789-abc.apps.googleusercontent.com` |
+| `GOOGLE_CLIENT_SECRET` | `GOCSPX-xxxxxxxxxxxxxxxxxxxx` |
+| `NEXTAUTH_SECRET` | `openssl rand -base64 32` output (min 32 chars) |
+| `NEXTAUTH_URL` | `https://akari-art.vercel.app` *(update after deploy)* |
+| `MONGODB_URL` | `mongodb+srv://user:pass@cluster.mongodb.net/akari` |
+| `CLOUDINARY_CLOUD_NAME` | `my-cloud-name` |
+| `CLOUDINARY_API_KEY` | `123456789012345` |
+| `CLOUDINARY_API_SECRET` | `xxxxxxxxxxxxxxxxxxxxxxxxxx` |
+| `CLOUDFLARE_ID` | `abcdef1234567890abcdef1234567890` |
+| `CLOUDFLARE_API_KEY` | `your-cloudflare-api-token` |
+| `NEXT_PUBLIC_BASE_URL` | `https://akari-art.vercel.app` |
+
+<Warning>
+Set `NEXTAUTH_URL` and `NEXT_PUBLIC_BASE_URL` to a placeholder for the initial deploy (e.g., `https://akari-art.vercel.app`). After Vercel assigns your actual domain in the next step, come back and update both values to match exactly.
+</Warning>
+</Step>
+
+<Step title="Deploy and note your Vercel URL">
+Click **Deploy**. Vercel will install dependencies and run `next build`. When the build succeeds, Vercel shows your live URL — for example, `https://akari-art.vercel.app` or `https://akari-art-git-main-yourname.vercel.app`.
+
+Copy this URL — you need it for the next two steps.
+</Step>
+
+<Step title="Update NEXTAUTH_URL and NEXT_PUBLIC_BASE_URL">
+Go to **Project Settings → Environment Variables** in the Vercel dashboard and update both variables to your real deployment URL:
+
+```
+NEXTAUTH_URL=https://akari-art.vercel.app
+NEXT_PUBLIC_BASE_URL=https://akari-art.vercel.app
+```
+
+After saving, trigger a **Redeploy** from the **Deployments** tab so the new values take effect.
+</Step>
+
+<Step title="Update the Google OAuth redirect URI">
+NextAuth.js registers the callback at `/api/auth/callback/google`. You must add this exact URL to your Google Cloud OAuth client's authorised redirect URIs, otherwise Google will reject the sign-in flow.
+
+1. Open [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
+2. Click your OAuth 2.0 client.
+3. Under **Authorized redirect URIs**, add:
+
+```
+https://<your-vercel-domain>/api/auth/callback/google
+```
+
+For example:
+
+```
+https://akari-art.vercel.app/api/auth/callback/google
+```
+
+4. Click **Save**.
+</Step>
+
+</Steps>
+
+---
+
+## Build Scripts
+
+The following scripts are defined in `package.json` and are used by Vercel automatically:
+
+```json
+"scripts": {
+  "dev": "next dev --turbopack",
+  "build": "next build",
+  "start": "next start",
+  "lint": "next lint"
+}
+```
+
+Vercel runs `build` during every deployment and `start` to serve the production build. The `dev` script with `--turbopack` is for local development only and is never invoked on Vercel.
+
+---
+
+## Post-Deployment Checklist
+
+<Accordion title="Google OAuth callback URI is updated">
+Confirm that `https://<your-vercel-domain>/api/auth/callback/google` appears in the **Authorized redirect URIs** list of your Google Cloud OAuth client. Missing this is the single most common reason sign-in fails after deployment.
+</Accordion>
+
+<Accordion title="NEXTAUTH_URL matches the actual deployment URL exactly">
+`NEXTAUTH_URL` must be the canonical URL of your deployment including the scheme (`https://`) and without a trailing slash. A mismatch causes NextAuth.js to generate incorrect callback URLs and broken session cookies.
+</Accordion>
+
+<Accordion title="MongoDB Atlas network access allows Vercel IPs">
+Vercel's serverless functions use dynamic egress IP addresses. In **MongoDB Atlas → Network Access**, either add Vercel's [published IP ranges](https://vercel.com/docs/security/deployment-protection/methods-to-protect-all-deployments/vercel-ip-addresses) or, for quick testing, allow access from anywhere (`0.0.0.0/0`). Restrict access to known IPs before going to production.
+</Accordion>
+
+<Accordion title="Test the full sign-in flow">
+1. Visit your Vercel URL in an incognito window.
+2. Click **Sign in with Google** on the `/signin` page.
+3. Complete the Google OAuth consent.
+4. Confirm you are redirected back to the dashboard and your session is active.
+</Accordion>
+
+---
+
+<Warning>
+The `allowedDevOrigins` array in `next.config.ts` — which includes `http://localhost:3000` and `http://192.168.1.6:3000` — is a Next.js 15 development-only setting for cross-origin dev server requests. It has no effect in production and does **not** need to be changed or removed before deploying to Vercel.
+</Warning>

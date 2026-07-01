@@ -1,0 +1,143 @@
+---
+title: "Akari Art Production Configuration Reference"
+sidebarTitle: "Configuration"
+description: "Complete reference for all 11 environment variables, next.config.ts image and dev-origin settings, MongoDB connection options, and the NextAuth.js middleware matcher."
+---
+
+This page is the single source of truth for every runtime setting Akari Art reads from its environment. Use it when provisioning a new deployment, rotating secrets, or debugging unexpected behaviour in production. Values are consumed across the Next.js server, NextAuth.js, Mongoose, Cloudinary, and the Cloudflare Workers AI client.
+
+---
+
+## Environment Variables
+
+All 11 variables below are **required**. The application throws at startup or produces 500 errors if any of them are missing or malformed.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GOOGLE_CLIENT_ID` | ✅ Yes | — | OAuth 2.0 client ID from Google Cloud Console. Passed directly to `GoogleProvider` in `lib/auth.ts`. |
+| `GOOGLE_CLIENT_SECRET` | ✅ Yes | — | OAuth 2.0 client secret from Google Cloud Console. Never expose this to the browser. |
+| `NEXTAUTH_SECRET` | ✅ Yes | — | Secret used by NextAuth.js to sign and verify JWT session tokens. Must be at least 32 characters. Generate with `openssl rand -base64 32`. |
+| `NEXTAUTH_URL` | ✅ Yes | — | Canonical base URL of the deployment (e.g., `https://akari-art.vercel.app`). Must match the URL you registered as the OAuth redirect URI in Google Cloud Console. |
+| `MONGODB_URL` | ✅ Yes | — | Full MongoDB connection string. Consumed by `dbConnect()` in `lib/database.ts`. Must be defined at server start; the app throws immediately if absent. |
+| `CLOUDINARY_CLOUD_NAME` | ✅ Yes | — | Cloudinary cloud name, visible in your Cloudinary dashboard under **Account Details**. |
+| `CLOUDINARY_API_KEY` | ✅ Yes | — | Cloudinary API key. Used server-side to authenticate upload and transformation requests. |
+| `CLOUDINARY_API_SECRET` | ✅ Yes | — | Cloudinary API secret. Never expose this to the browser or commit it to source control. |
+| `CLOUDFLARE_ID` | ✅ Yes | — | Cloudflare account ID, found in the Cloudflare dashboard URL (`dash.cloudflare.com/<account-id>`). Required to target the correct Workers AI endpoint. |
+| `CLOUDFLARE_API_KEY` | ✅ Yes | — | Cloudflare API token with the **Workers AI → Run** permission. Create tokens at `dash.cloudflare.com/profile/api-tokens`. |
+| `NEXT_PUBLIC_BASE_URL` | ✅ Yes | — | Public base URL used in client-side code to construct API route paths (e.g., `https://akari-art.vercel.app`). Prefixed with `NEXT_PUBLIC_` so Next.js inlines it into the browser bundle at build time. |
+
+<Note>
+`NEXT_PUBLIC_BASE_URL` and `NEXTAUTH_URL` should always be set to the same value in production. A mismatch causes client-side API calls to target the wrong host while NextAuth.js redirects to a different domain.
+</Note>
+
+---
+
+## next.config.ts Options
+
+The full content of `next.config.ts` is:
+
+```ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  allowedDevOrigins: ["http://localhost:3000", "http://192.168.1.6:3000"],
+  images: {
+    domains: ["res.cloudinary.com"],
+  },
+};
+
+export default nextConfig;
+```
+
+### `allowedDevOrigins`
+
+```ts
+allowedDevOrigins: ["http://localhost:3000", "http://192.168.1.6:3000"]
+```
+
+A Next.js 15 development-only setting that permits cross-origin requests from the listed origins to the local dev server. This is useful when testing on a device connected to the same LAN (e.g., `192.168.1.6`). This array is **ignored in production** — it has no effect on Vercel or any other hosted environment and does not need to be modified before deploying.
+
+### `images.domains`
+
+```ts
+images: {
+  domains: ["res.cloudinary.com"],
+}
+```
+
+Allows Next.js's built-in `<Image>` component to optimise and serve images hosted at `res.cloudinary.com`. Without this entry, any `<Image src="https://res.cloudinary.com/..." />` call throws an `Invalid src` error. All AI-generated images in Akari Art are stored and served via Cloudinary, making this setting mandatory.
+
+---
+
+## MongoDB Connection Settings
+
+`lib/database.ts` implements a cached Mongoose connection with the following options passed to `mongoose.connect()`:
+
+```ts
+const opts = {
+  bufferCommands: true,
+  maxPoolSize: 10,
+};
+
+mongoose.connect(MONGODB_URI, opts).then(() => mongoose.connection);
+```
+
+| Option | Value | Effect |
+|---|---|---|
+| `bufferCommands` | `true` | Mongoose buffers model method calls (e.g., `find`, `create`) until the connection is established. Prevents errors during the cold-start window of serverless function invocations. |
+| `maxPoolSize` | `10` | Sets the maximum number of concurrent connections Mongoose maintains in its connection pool. Limits resource usage on Atlas's free and shared tiers. |
+
+The `dbConnect()` function also caches the Mongoose connection across hot-reload cycles in development and across multiple serverless invocations that share the same Node.js instance, avoiding connection exhaustion under concurrent load.
+
+<Tip>
+Use a MongoDB Atlas connection string that includes `?retryWrites=true&w=majority` for production deployments. `retryWrites=true` automatically retries transient write failures, and `w=majority` ensures writes are acknowledged by a majority of replica-set members before returning — improving durability with minimal latency overhead.
+
+```
+mongodb+srv://user:password@cluster.mongodb.net/akari?retryWrites=true&w=majority
+```
+</Tip>
+
+---
+
+## Middleware Configuration
+
+`middleware.ts` wraps every request with NextAuth.js's `withAuth` helper. The `matcher` pattern controls which routes trigger the middleware:
+
+```ts
+export const config = {
+  matcher: [
+    // Protect all routes except static files and public assets
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
+};
+```
+
+The negative lookahead `(?!_next/static|_next/image|favicon.ico)` excludes the three paths listed below from auth checks, so they are always publicly accessible:
+
+| Excluded Prefix | Purpose |
+|---|---|
+| `_next/static` | Compiled JS, CSS, and font bundles served by Next.js |
+| `_next/image` | Next.js image optimisation API responses |
+| `favicon.ico` | Browser favicon request |
+
+Every other path — including all API routes and application pages — passes through the `authorized` callback, which allows unauthenticated access only to `/`, `/signin`, and paths beginning with `/api/auth/*`. All other routes require a valid JWT session token; unauthorised requests are redirected to `/signin`.
+
+```ts
+callbacks: {
+  authorized({ req, token }) {
+    const { pathname } = req.nextUrl;
+
+    if (
+      pathname.startsWith("/api/auth/*") ||
+      pathname === "/signin" ||
+      pathname === "/"
+    ) {
+      return true;
+    }
+
+    const isAuthorized = !!token;
+    if (!isAuthorized) console.warn(`Unauthorized access to ${pathname}`);
+    return isAuthorized;
+  },
+},
+```

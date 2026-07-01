@@ -1,0 +1,319 @@
+---
+title: "External Service Integrations in Akari Art"
+sidebarTitle: "Integrations"
+description: "Configuration, request/response shapes, and code for Cloudflare Workers AI, Cloudinary image hosting, and NextAuth.js Google OAuth used by Akari Art."
+---
+
+Akari Art relies on three external services to deliver its core functionality: **Cloudflare Workers AI** for text-to-image generation, **Cloudinary** for durable image storage and delivery, and **NextAuth.js with Google OAuth** for authentication. Each service is isolated into its own module under `lib/` or wired directly into a Route Handler, keeping responsibilities clean and environment credentials centralised.
+
+## Cloudflare Workers AI
+
+Akari Art uses the Cloudflare Workers AI REST API to run the `@cf/black-forest-labs/flux-1-schnell` model. The integration lives entirely in `app/api/image-generation/route.ts` and is called via `axios`.
+
+### Endpoint
+
+```
+POST https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell
+```
+
+### Request
+
+| Property | Value |
+|---|---|
+| Method | `POST` |
+| `Content-Type` | `application/json` |
+| `Authorization` | `Bearer {CLOUDFLARE_API_KEY}` |
+| Body | `{ "prompt": "<user text>" }` |
+
+### Response
+
+```json
+{
+  "success": true,
+  "result": {
+    "image": "<base64-encoded PNG string>"
+  }
+}
+```
+
+The `result.image` field is a raw base64-encoded PNG. It is not a URL — it must be uploaded to a hosting service (Cloudinary, in Akari Art's case) before it can be served to a browser.
+
+### Route Handler Implementation
+
+```ts
+import cloudinary from "@/lib/cloudinary";
+import axios from "axios";
+import { NextRequest, NextResponse } from "next/server";
+
+export async function POST(request: NextRequest) {
+  try {
+    const { prompt }: { prompt: string } = await request.json();
+    const CLOUDFLARE_ID = process.env.CLOUDFLARE_ID;
+    const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_KEY;
+    const response = await axios.post(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+      { prompt },
+      {
+        headers: {
+          Authorization: `Bearer ${CLOUDFLARE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!response.data.success) {
+      return NextResponse.json(
+        { error: "Cloudflare API returned an error" },
+        { status: 500 }
+      );
+    }
+
+    const base64Image = response.data.result.image;
+    const photoUrl = await cloudinary.uploader.upload(
+      `data:image/png;base64,${base64Image}`
+    );
+    return NextResponse.json(
+      {
+        photo: photoUrl.secure_url,
+      },
+      {
+        status: 200,
+      }
+    );
+  } catch (error) {
+    console.error("Error generating image:", error);
+
+    return NextResponse.json(
+      { error: "Failed to generate image" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `CLOUDFLARE_ID` | Your Cloudflare account ID |
+| `CLOUDFLARE_API_KEY` | API token with Workers AI read permission |
+
+---
+
+## Cloudinary
+
+Cloudinary is used as the sole image storage and delivery layer. After Cloudflare Workers AI returns a base64 PNG, it is immediately uploaded to Cloudinary, and only the resulting `secure_url` is stored in MongoDB or returned to the client.
+
+### Configuration — `lib/cloudinary.ts`
+
+```ts
+import { v2 as cloudinary } from "cloudinary";
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+export default cloudinary;
+```
+
+The exported `cloudinary` instance is the configured Cloudinary v2 SDK client. Import it wherever an upload is needed:
+
+```ts
+import cloudinary from "@/lib/cloudinary";
+```
+
+### Upload Pattern
+
+The base64 image is wrapped in a data URI before upload:
+
+```ts
+const photoUrl = await cloudinary.uploader.upload(
+  `data:image/png;base64,${base64Image}`
+);
+// photoUrl.secure_url → "https://res.cloudinary.com/<cloud>/image/upload/..."
+```
+
+`cloudinary.uploader.upload()` accepts a data URI string directly. The returned object contains a `secure_url` property — an `https://res.cloudinary.com/...` URL — which is what gets stored in the `photo` field of a Post document and returned to the browser.
+
+### Next.js Image Domain Allow-list
+
+`next.config.ts` adds `res.cloudinary.com` as an allowed image domain so that the Next.js `<Image>` component can optimise and serve Cloudinary-hosted images:
+
+```ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  allowedDevOrigins: ["http://localhost:3000", "http://192.168.1.6:3000"],
+  images: {
+    domains: ["res.cloudinary.com"],
+  },
+};
+
+export default nextConfig;
+```
+
+### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `CLOUDINARY_CLOUD_NAME` | Your Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | Cloudinary API key |
+| `CLOUDINARY_API_SECRET` | Cloudinary API secret |
+
+---
+
+## NextAuth.js — Google OAuth
+
+Authentication is configured in `lib/auth.ts` using NextAuth.js v4 with a single Google OAuth 2.0 provider. Sessions are stored as signed JWTs in a cookie — no `Session` collection is ever written to MongoDB.
+
+### Auth Configuration — `lib/auth.ts`
+
+```ts
+import GoogleProvider from "next-auth/providers/google";
+import { NextAuthOptions } from "next-auth";
+import { dbConnect } from "./database";
+import User from "@/model/user";
+
+export const authOptions: NextAuthOptions = {
+  providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+  ],
+
+  callbacks: {
+    async signIn({ user, account }) {
+      await dbConnect();
+      const existingUser = await User.findOne({ email: user.email });
+
+      if (!existingUser) {
+        await User.create({
+          name: user.name,
+          email: user.email,
+          image: user.image,
+          provider: account?.provider,
+        });
+      }
+
+      return true;
+    },
+
+    async jwt({ token, user }) {
+      await dbConnect();
+      if (user) {
+        const existingUser = await User.findOne({ email: user.email });
+        if (existingUser) {
+          token.id = existingUser._id.toString();
+          token.name = existingUser.name;
+        }
+      }
+      return token;
+    },
+
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.id = token.id as string;
+        session.user.name = token.name as string;
+      }
+
+      return session;
+    },
+
+    async redirect({ baseUrl }) {
+      return baseUrl;
+    },
+  },
+  pages: {
+    signIn: "/signin",
+    error: "/signin",
+  },
+  session: {
+    strategy: "jwt",
+  },
+  secret: process.env.NEXTAUTH_SECRET,
+};
+```
+
+### Callback Responsibilities
+
+| Callback | What It Does |
+|---|---|
+| `signIn` | Calls `dbConnect()`, checks for an existing user by email, and creates one if absent — effectively an upsert on first login |
+| `jwt` | Looks up the MongoDB `_id` for the authenticated user and attaches it to the JWT token as `token.id` |
+| `session` | Copies `token.id` and `token.name` onto `session.user`, making the MongoDB `_id` accessible as `session.user.id` in client components and API routes |
+| `redirect` | Returns `baseUrl` to prevent open-redirect vulnerabilities and ensure post-login navigation always lands on the app root |
+
+The `session.user.id` field is made type-safe via `next-auth.d.ts`:
+
+```ts
+import NextAuth, { DefaultSession } from "next-auth";
+
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+    } & DefaultSession["user"];
+  }
+}
+```
+
+### Custom Pages
+
+| Page | Path | Used For |
+|---|---|---|
+| Sign-in | `/signin` | Renders the Google sign-in button |
+| Error | `/signin` | Auth errors (e.g. OAuth callback failure) are sent to the same page |
+
+### Route Protection — `middleware.ts`
+
+`withAuth` from `next-auth/middleware` wraps the middleware function. The `authorized` callback allows unauthenticated access only to `/`, `/signin`, and `/api/auth/*`. Every other route requires a valid JWT token:
+
+```ts
+import { withAuth } from "next-auth/middleware";
+import { NextResponse } from "next/server";
+
+export default withAuth(
+  function middleware() {
+    return NextResponse.next();
+  },
+  {
+    callbacks: {
+      authorized({ req, token }) {
+        const { pathname } = req.nextUrl;
+        if (
+          pathname.startsWith("/api/auth/*") ||
+          pathname === "/signin" ||
+          pathname === "/"
+        ) {
+          return true;
+        }
+
+        const isAuthorized = !!token;
+        return isAuthorized;
+      },
+    },
+  }
+);
+
+export const config = {
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
+};
+```
+
+### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `GOOGLE_CLIENT_ID` | OAuth 2.0 client ID from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | OAuth 2.0 client secret from Google Cloud Console |
+| `NEXTAUTH_SECRET` | Random secret used to sign and encrypt JWT cookies |
+| `NEXTAUTH_URL` | Canonical URL of the deployment (e.g. `https://akari-art.vercel.app`) |
+
+<Tip>
+  Generate a strong `NEXTAUTH_SECRET` with `openssl rand -base64 32` and store it in `.env.local` for local development. Never commit this value to source control.
+</Tip>

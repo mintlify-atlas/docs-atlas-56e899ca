@@ -1,47 +1,114 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Akari Art in Minutes"
+sidebarTitle: "Quickstart"
+description: "Clone Akari Art, install dependencies, configure service credentials, and spin up the Next.js dev server to generate AI images locally in minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through running Akari Art on your local machine from scratch. You will clone the repository, install Node.js dependencies, configure the required service credentials, and start the Next.js development server with Turbopack. By the end you will be able to sign in with Google, generate AI images from text prompts, and explore the community gallery.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure you have the following ready:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Node.js 18 or later** — the project targets the Node.js runtime used by Next.js 15.
+- **MongoDB** — either a free [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) cluster or a local instance.
+- **Cloudinary account** — for storing and serving generated images. [Sign up free](https://cloudinary.com/users/register/free).
+- **Cloudflare account** — with Workers AI enabled on your account to access the Flux-1-Schnell model.
+- **Google Cloud project** — with the OAuth 2.0 credentials configured for sign-in via NextAuth.js.
 
-## Get started
+See the [Environment Setup](/environment-setup) page for step-by-step instructions on creating each set of credentials.
+
+## Setup Steps
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Download the source code and navigate into the project directory:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/nayalsaurav/Akari-Art.git && cd Akari-Art
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Install dependencies">
+    Install all Node.js dependencies using your preferred package manager:
+
+    <CodeGroup>
+      ```bash npm
+      npm install
+      ```
+
+      ```bash yarn
+      yarn install
+      ```
+
+      ```bash pnpm
+      pnpm install
+      ```
+
+      ```bash bun
+      bun install
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env.local` file in the project root and populate it with your credentials. Refer to the [Environment Setup](/environment-setup) page for detailed instructions on obtaining each value.
+
+    ```bash .env.local
+    # Google OAuth (NextAuth.js)
+    GOOGLE_CLIENT_ID=
+    GOOGLE_CLIENT_SECRET=
+
+    # NextAuth.js
+    NEXTAUTH_SECRET=
+    NEXTAUTH_URL=
+
+    # MongoDB
+    MONGODB_URL=
+
+    # Cloudinary
+    CLOUDINARY_CLOUD_NAME=
+    CLOUDINARY_API_KEY=
+    CLOUDINARY_API_SECRET=
+
+    # Cloudflare Workers AI
+    CLOUDFLARE_ID=
+    CLOUDFLARE_API_KEY=
+
+    # Application
+    NEXT_PUBLIC_BASE_URL=
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
-    ```
+  <Step title="Start the development server">
+    Launch the Next.js development server:
+
+    <CodeGroup>
+      ```bash npm
+      npm run dev
+      ```
+
+      ```bash yarn
+      yarn dev
+      ```
+
+      ```bash pnpm
+      pnpm dev
+      ```
+
+      ```bash bun
+      bun dev
+      ```
+    </CodeGroup>
+
+    The server starts on [http://localhost:3000](http://localhost:3000) by default.
+  </Step>
+
+  <Step title="Sign in and generate your first image">
+    Open [http://localhost:3000](http://localhost:3000) in your browser. Click **Sign in with Google**, complete the OAuth flow, and you will be redirected to the home page. Navigate to the generation page, type a descriptive prompt, and submit it. Akari Art calls Cloudflare Workers AI, receives the generated image, uploads it to Cloudinary, and displays it on screen — typically within a few seconds.
   </Step>
 </Steps>
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  The `npm run dev` script (and its equivalents for other package managers) already includes the `--turbopack` flag — `next dev --turbopack` — so Turbopack is enabled by default. You benefit from significantly faster hot-module replacement without any extra configuration.
 </Tip>

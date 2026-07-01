@@ -1,0 +1,259 @@
+---
+title: "Google OAuth Authentication in Akari Art"
+sidebarTitle: "Authentication"
+description: "Secure every Akari Art route with NextAuth.js Google OAuth, JWT sessions, and Next.js middleware — from first sign-in to MongoDB user creation and session hydration."
+---
+
+Akari Art uses **NextAuth.js** with the Google OAuth 2.0 provider to handle all authentication. There are no passwords to manage: users sign in with their existing Google account, and NextAuth issues a JWT that is verified on every subsequent request. On first sign-in, a user document is automatically created in MongoDB so that the session can be enriched with a stable database `id`. All protected pages and API routes check for a valid token before allowing access.
+
+## Sign-in flow
+
+<Steps>
+  <Step title="Unauthenticated user visits a protected route">
+    A user without a session tries to access a protected page such as `/create` or `/community`. The page performs a server-side session check:
+
+    ```ts
+    const session = await getServerSession(authOptions);
+    if (!session || !session.user) {
+      redirect("/signin");
+    }
+    ```
+
+    The middleware layer also provides a second line of defence (see [Protected routes](#protected-routes) below).
+  </Step>
+  <Step title="Middleware redirects to /signin">
+    Next.js middleware intercepts the request before it reaches the page. The `authorized` callback returns `false` for any unauthenticated request to a non-public path, which causes NextAuth's `withAuth` wrapper to redirect the browser to `/signin` (configured via `pages.signIn`).
+  </Step>
+  <Step title="User clicks Sign in with Google">
+    The `/signin` page renders the `SigninFormDemo` component. Clicking the **Google** button calls NextAuth's `signIn` function with the `"google"` provider:
+
+    ```tsx
+    onClick={async () => {
+      await signIn("google");
+    }}
+    ```
+
+    The browser is redirected to Google's OAuth consent screen.
+  </Step>
+  <Step title="NextAuth handles the OAuth callback">
+    After the user grants consent, Google redirects back to `/api/auth/callback/google`. NextAuth validates the authorization code, exchanges it for tokens, and extracts the user's profile (`name`, `email`, `image`) from the ID token.
+  </Step>
+  <Step title="signIn callback checks MongoDB; creates user if new">
+    The `signIn` callback connects to MongoDB and looks up the user by email. If no document exists yet, a new one is created with `name`, `email`, `image`, and `provider` fields:
+
+    ```ts
+    async signIn({ user, account }) {
+      await dbConnect();
+      const existingUser = await User.findOne({ email: user.email });
+
+      if (!existingUser) {
+        await User.create({
+          name: user.name,
+          email: user.email,
+          image: user.image,
+          provider: account?.provider,
+        });
+      }
+
+      return true;
+    },
+    ```
+  </Step>
+  <Step title="JWT token is issued with user id and name">
+    The `jwt` callback runs after `signIn`. It fetches the MongoDB document again to obtain the stable `_id` and attaches it — along with the display name — to the token:
+
+    ```ts
+    async jwt({ token, user }) {
+      await dbConnect();
+      if (user) {
+        const existingUser = await User.findOne({ email: user.email });
+        if (existingUser) {
+          token.id = existingUser._id.toString();
+          token.name = existingUser.name;
+        }
+      }
+      return token;
+    },
+    ```
+  </Step>
+  <Step title="Session is returned to the client">
+    The `session` callback reads the enriched token and copies `id` and `name` onto `session.user`:
+
+    ```ts
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.id = token.id as string;
+        session.user.name = token.name as string;
+      }
+      return session;
+    },
+    ```
+
+    The client accesses this session via `useSession()` or `getServerSession(authOptions)`.
+  </Step>
+</Steps>
+
+## Session data
+
+The default NextAuth `Session` type is extended in `next-auth.d.ts` to expose `session.user.id`:
+
+```ts
+import NextAuth, { DefaultSession } from "next-auth";
+
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+    } & DefaultSession["user"];
+  }
+}
+```
+
+`DefaultSession["user"]` already includes `name`, `email`, and `image`, so the full shape available in any component or route is:
+
+| Field | Type | Source |
+|---|---|---|
+| `session.user.id` | `string` | MongoDB `_id` (stringified) |
+| `session.user.name` | `string \| null` | MongoDB `name` field |
+| `session.user.email` | `string \| null` | Google profile email |
+| `session.user.image` | `string \| null` | Google profile avatar URL |
+
+In client components, retrieve the session with the `useSession` hook:
+
+```tsx
+import { useSession } from "next-auth/react";
+
+const { data: session } = useSession();
+const userId = session?.user.id;
+const userName = session?.user.name;
+```
+
+## Protected routes
+
+Route protection is enforced by the `withAuth` middleware in `middleware.ts`. The `authorized` callback is called for every request that matches the `config.matcher` pattern (everything except `_next/static`, `_next/image`, and `favicon.ico`).
+
+**Public paths** — requests to these paths are always allowed through, regardless of token state:
+
+- `/` — landing page
+- `/signin` — sign-in page
+- `/api/auth/*` — NextAuth internal endpoints (OAuth callback, session, CSRF)
+
+**All other paths** require a valid JWT token. If `token` is `null`, `authorized` returns `false`, triggering an automatic redirect to `/signin`:
+
+```ts
+export default withAuth(
+  function middleware() {
+    return NextResponse.next();
+  },
+  {
+    callbacks: {
+      authorized({ req, token }) {
+        const { pathname } = req.nextUrl;
+
+        if (
+          pathname.startsWith("/api/auth/*") ||
+          pathname === "/signin" ||
+          pathname === "//"
+        ) {
+          return true;
+        }
+
+        return !!token;
+      },
+    },
+  }
+);
+
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+};
+```
+
+## User model
+
+Each authenticated user is represented in MongoDB by a document conforming to the `IUser` interface:
+
+```ts
+export interface IUser extends Document {
+  _id: mongoose.Types.ObjectId;
+  name: string;
+  email: string;
+  image?: string;
+  emailVerified?: Date | null;
+  provider?: "google" | "email";
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `_id` | Auto | MongoDB ObjectId, used as `session.user.id` |
+| `name` | No | Display name from Google profile |
+| `email` | **Yes** (unique) | Primary identifier used to look up existing users |
+| `image` | No | Google profile photo URL |
+| `emailVerified` | No | Date the email was verified (set by the provider) |
+| `provider` | No | `"google"` for all OAuth sign-ins |
+
+The schema also adds `createdAt` and `updatedAt` timestamps automatically via `{ timestamps: true }`.
+
+## authOptions callbacks
+
+The complete `authOptions` object used throughout the app:
+
+```ts
+export const authOptions: NextAuthOptions = {
+  providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+  ],
+  callbacks: {
+    async signIn({ user, account }) {
+      await dbConnect();
+      const existingUser = await User.findOne({ email: user.email });
+      if (!existingUser) {
+        await User.create({
+          name: user.name,
+          email: user.email,
+          image: user.image,
+          provider: account?.provider,
+        });
+      }
+      return true;
+    },
+    async jwt({ token, user }) {
+      await dbConnect();
+      if (user) {
+        const existingUser = await User.findOne({ email: user.email });
+        if (existingUser) {
+          token.id = existingUser._id.toString();
+          token.name = existingUser.name;
+        }
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.id = token.id as string;
+        session.user.name = token.name as string;
+      }
+      return session;
+    },
+    async redirect({ baseUrl }) {
+      return baseUrl;
+    },
+  },
+  pages: {
+    signIn: "/signin",
+    error: "/signin",
+  },
+  session: {
+    strategy: "jwt",
+  },
+  secret: process.env.NEXTAUTH_SECRET,
+};
+```
+
+<Warning>
+  Never expose `NEXTAUTH_SECRET`, `GOOGLE_CLIENT_ID`, or `GOOGLE_CLIENT_SECRET` in client-side code, public environment variables, or version control. These values must only be set as server-side environment variables (without the `NEXT_PUBLIC_` prefix). Leaking `NEXTAUTH_SECRET` would allow an attacker to forge valid JWT tokens and impersonate any user.
+</Warning>

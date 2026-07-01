@@ -1,0 +1,96 @@
+---
+title: "Akari Art System Architecture Overview"
+sidebarTitle: "Overview"
+description: "A technical walkthrough of Akari Art's layered architecture — Next.js App Router, MongoDB, Cloudflare Workers AI, and Cloudinary working together."
+---
+
+Akari Art is a full-stack AI image generation platform built on **Next.js 15** with the App Router. It combines a React Server Component frontend, Next.js Route Handlers as its API layer, MongoDB (via Mongoose) for persistence, Cloudflare Workers AI (Flux-1-Schnell) for image synthesis, and Cloudinary for image hosting. Authentication is handled entirely by NextAuth.js using Google OAuth 2.0 with JWT sessions, meaning no session data is ever written to the database.
+
+## Application Layers
+
+<CardGroup cols={2}>
+  <Card title="Frontend — Next.js App Router" icon="browser">
+    Pages live under `app/` and are built with React Server Components where possible. Protected routes (`/create`, `/community`) are gated by `middleware.ts` using `withAuth` from NextAuth.js. Client-interactive surfaces (`ImageGenerator.tsx`, `RenderPosts.tsx`) are isolated into dedicated Client Components.
+  </Card>
+  <Card title="API Routes — Next.js Route Handlers" icon="code">
+    Three Route Handler modules power the backend: `app/api/auth/[...nextauth]/route.ts` handles the full OAuth flow, `app/api/image-generation/route.ts` proxies prompts to Cloudflare Workers AI and uploads results to Cloudinary, and `app/api/post/route.ts` provides `GET` (fetch all posts) and `POST` (create a post) operations against MongoDB.
+  </Card>
+  <Card title="Database Layer — MongoDB + Mongoose" icon="database">
+    MongoDB Atlas stores two collections: `users` and `posts`. Mongoose models (`model/user.ts`, `model/post.ts`) enforce schemas and TypeScript interfaces. The `lib/database.ts` module implements a global connection cache with `maxPoolSize: 10` to safely share a single connection across serverless function invocations.
+  </Card>
+  <Card title="External Services — Cloudflare AI + Cloudinary" icon="cloud">
+    User prompts are sent over HTTPS to the Cloudflare Workers AI REST API, which runs the `@cf/black-forest-labs/flux-1-schnell` model and returns a base64-encoded PNG. That PNG is immediately uploaded to Cloudinary via the Node.js SDK, and the resulting `secure_url` is what gets stored and served — never the raw base64 payload.
+  </Card>
+</CardGroup>
+
+## Image Generation Request Flow
+
+<Steps>
+  <Step title="Browser sends prompt">
+    The `ImageGenerator` client component collects the user's text prompt and issues a `POST /api/image-generation` request with the JSON body `{ "prompt": "<user text>" }`.
+  </Step>
+  <Step title="Next.js Route Handler forwards to Cloudflare">
+    `app/api/image-generation/route.ts` reads `CLOUDFLARE_ID` and `CLOUDFLARE_API_KEY` from environment variables, then calls:
+    ```
+    POST https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell
+    ```
+    with `Authorization: Bearer {CLOUDFLARE_API_KEY}` and `{ prompt }` as the body.
+  </Step>
+  <Step title="Cloudflare Workers AI generates the image">
+    Flux-1-Schnell processes the prompt and returns `{ success: true, result: { image: "<base64 PNG>" } }`. If `success` is `false`, the route handler immediately returns a `500` error to the client.
+  </Step>
+  <Step title="Base64 image is uploaded to Cloudinary">
+    The Route Handler calls `cloudinary.uploader.upload("data:image/png;base64,<base64>")`. Cloudinary stores the image and returns a `secure_url` of the form `https://res.cloudinary.com/...`.
+  </Step>
+  <Step title="Cloudinary URL is returned to the browser">
+    The Route Handler responds with `{ photo: photoUrl.secure_url }` and HTTP `200`. The client renders the image using Next.js `<Image>` (domain `res.cloudinary.com` is allow-listed in `next.config.ts`).
+  </Step>
+  <Step title="User shares to Community (optional)">
+    If the user clicks Share, the client sends `POST /api/post` with `{ name, prompt, photo }`. The Route Handler calls `dbConnect()`, then `Post.create(...)`, persisting the Cloudinary URL to MongoDB.
+  </Step>
+</Steps>
+
+## Directory Structure
+
+```
+Akari-Art/
+├── app/
+│   ├── api/
+│   │   ├── auth/[...nextauth]/route.ts
+│   │   ├── image-generation/route.ts
+│   │   └── post/route.ts
+│   ├── community/page.tsx
+│   ├── create/page.tsx
+│   ├── signin/page.tsx
+│   ├── layout.tsx
+│   └── page.tsx
+├── components/
+│   ├── ui/
+│   ├── ImageGenerator.tsx
+│   ├── RenderPosts.tsx
+│   ├── Card.tsx
+│   ├── Navbar.tsx
+│   └── Hero.tsx
+├── lib/
+│   ├── auth.ts
+│   ├── cloudinary.ts
+│   └── database.ts
+├── model/
+│   ├── post.ts
+│   └── user.ts
+└── middleware.ts
+```
+
+## Key Design Decisions
+
+**App Router with Server Components for auth-protected pages**
+Routes like `/create` and `/community` are protected at the middleware layer by `withAuth` — before any page component is even evaluated. The `middleware.ts` matcher covers every path except `_next/static`, `_next/image`, and `favicon.ico`, so no protected route can be reached without a valid JWT.
+
+**MongoDB connection pooling with global cache**
+In a serverless environment, each function invocation can create its own database connection, quickly exhausting the Atlas connection limit. `lib/database.ts` writes the Mongoose connection and its pending promise to `global.mongoose`, so warm invocations reuse the established connection. The `maxPoolSize: 10` option caps concurrent connections per Node.js process.
+
+**Images stored in Cloudinary rather than inline**
+Storing raw base64 strings in MongoDB would bloat documents and make retrieval slow. Instead, every generated image is immediately pushed to Cloudinary; only the resulting `https://res.cloudinary.com/...` URL is saved in the `posts` collection. `next.config.ts` allow-lists `res.cloudinary.com` so Next.js `<Image>` can serve optimised variants.
+
+**JWT sessions for stateless auth**
+`lib/auth.ts` configures `session: { strategy: "jwt" }`. Session data is encoded in a signed cookie and never written to MongoDB. The `jwt` and `session` callbacks attach the MongoDB user `_id` to the token and surface it as `session.user.id`, making the ID available to client components and API routes without an extra database round-trip.

@@ -1,0 +1,99 @@
+---
+title: "Akari Art REST API Overview — Routes & Auth"
+sidebarTitle: "Overview"
+description: "A complete reference for all Akari Art API routes, authentication requirements, request/response formats, and error handling conventions used across the platform."
+---
+
+Akari Art exposes three server-side API route groups built with Next.js 15 Route Handlers: image generation via Cloudflare Workers AI, community post management backed by MongoDB, and OAuth-powered authentication via NextAuth.js. All API routes live under `/api/` and share consistent JSON request/response conventions.
+
+<Note>
+  These are **Next.js Route Handler** endpoints — server-side functions that run
+  inside your Next.js application, not a standalone REST service. They are
+  deployed and served as part of the same Next.js process and inherit the full
+  Node.js / Edge runtime context.
+</Note>
+
+## Base URL
+
+All routes are relative to your application's base URL, configured via the `NEXT_PUBLIC_BASE_URL` environment variable.
+
+| Environment | Base URL |
+|-------------|----------|
+| Local development | `http://localhost:3000` |
+| Production | Value of `NEXT_PUBLIC_BASE_URL` |
+
+Set this in your `.env.local` file:
+
+```bash
+NEXT_PUBLIC_BASE_URL=https://your-domain.com
+```
+
+## Authentication
+
+Akari Art uses **NextAuth.js JWT sessions**. When a user signs in with Google OAuth, NextAuth sets a signed `next-auth.session-token` cookie. All subsequent browser requests to protected API routes automatically include this cookie — no extra `Authorization` header is needed.
+
+The `middleware.ts` file enforces protection at the edge. Every route is intercepted and checked for a valid JWT token **except** the following public paths:
+
+- `/` — landing page
+- `/signin` — sign-in page
+- `/api/auth/*` — NextAuth internal routes
+
+Any request to a protected route without a valid token is redirected to `/signin`. Requests originating from authenticated browser sessions pass through automatically.
+
+<Tip>
+  When calling the API from server components or server actions, use
+  `getServerSession(authOptions)` to retrieve the session without relying on
+  cookies being forwarded automatically. See the [Auth reference](/api/auth) for
+  an example.
+</Tip>
+
+## API Endpoints Summary
+
+| Method | Path | Description | Auth Required |
+|--------|------|-------------|---------------|
+| `POST` | `/api/image-generation` | Generate an image from a text prompt | Yes |
+| `GET` | `/api/post` | List all community posts | No (server-side fetch) |
+| `POST` | `/api/post` | Create a new community post | Yes |
+| `GET` | `/api/auth/[...nextauth]` | OAuth sign-in flow & session endpoints | No |
+| `POST` | `/api/auth/[...nextauth]` | OAuth callback & sign-out | No |
+
+## Error Handling
+
+All error responses return JSON with one of two shapes, depending on the route:
+
+**Simple error** (image generation):
+```json
+{
+  "error": "A human-readable error message"
+}
+```
+
+**Structured error** (posts):
+```json
+{
+  "success": false,
+  "message": "A human-readable message",
+  "error": "Underlying error details"
+}
+```
+
+HTTP status codes used across all routes:
+
+| Status | Meaning |
+|--------|---------|
+| `200` | Request succeeded |
+| `201` | Resource created successfully |
+| `400` | Bad request — missing or invalid fields |
+| `500` | Internal server error |
+
+## Content-Type
+
+All API requests must include `Content-Type: application/json` in the request headers when sending a body. All responses are returned as `application/json`.
+
+```js
+fetch('/api/image-generation', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ prompt: '...' }),
+});
+```

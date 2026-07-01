@@ -1,0 +1,155 @@
+---
+title: "POST /api/image-generation — Generate AI Art"
+sidebarTitle: "Image Generation"
+description: "Generate AI images from text prompts using Cloudflare Workers AI Flux-1-Schnell model, automatically uploaded to Cloudinary and returned as a secure URL."
+---
+
+The image generation endpoint accepts a text prompt, runs it through the **Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell`** model, converts the resulting base64-encoded PNG to a hosted asset via Cloudinary, and returns the `secure_url` of the uploaded image. This is the core generation step in the Akari Art creation flow.
+
+## Endpoint
+
+```
+POST /api/image-generation
+```
+
+## Authentication
+
+A valid NextAuth.js session cookie is required. The Next.js middleware automatically enforces this — unauthenticated requests are redirected to `/signin` before they reach this handler. When calling from the browser, the session cookie is included automatically.
+
+## Request Body
+
+<ParamField body="prompt" type="string" required>
+  The text description of the image to generate. Should be descriptive and
+  specific for best results. Minimum 10 characters recommended.
+
+  **Example:** `"A purple nebula with glowing stars, digital art style"`
+</ParamField>
+
+## Response
+
+### 200 — Success
+
+<ResponseField name="photo" type="string">
+  The Cloudinary `secure_url` of the generated and uploaded image. This is a
+  permanent HTTPS URL served from Cloudinary's CDN.
+
+  **Example:** `"https://res.cloudinary.com/your-cloud/image/upload/v1234567890/abc123.png"`
+</ResponseField>
+
+### 500 — Error
+
+<ResponseField name="error" type="string">
+  A message describing the failure. One of two values:
+
+  - `"Cloudflare API returned an error"` — the Cloudflare Workers AI API
+    responded with `success: false`
+  - `"Failed to generate image"` — an unexpected error occurred (network
+    failure, Cloudinary upload error, etc.)
+</ResponseField>
+
+## Example Request
+
+```js
+const response = await fetch('/api/image-generation', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ prompt: 'A purple nebula with glowing stars, digital art style' }),
+});
+const data = await response.json();
+console.log(data.photo); // https://res.cloudinary.com/...
+```
+
+## How It Works
+
+<Steps>
+  <Step title="Receive the prompt">
+    The handler reads the `prompt` field from the JSON request body.
+  </Step>
+  <Step title="Call Cloudflare Workers AI">
+    An HTTP `POST` request is made to the Cloudflare AI API using the
+    `@cf/black-forest-labs/flux-1-schnell` model:
+
+    ```
+    POST https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell
+    ```
+
+    The request is authenticated with a `Bearer` token from the
+    `CLOUDFLARE_API_KEY` environment variable. If the response includes
+    `success: false`, a `500` error is returned immediately.
+  </Step>
+  <Step title="Extract base64 image">
+    On success, the Cloudflare response contains `result.image` — a base64-encoded PNG string.
+  </Step>
+  <Step title="Upload to Cloudinary">
+    The base64 string is prefixed with `data:image/png;base64,` and uploaded
+    directly to Cloudinary using the configured Cloudinary SDK instance. Cloudinary
+    stores the image and returns an upload result object.
+  </Step>
+  <Step title="Return the secure URL">
+    The `secure_url` from the Cloudinary upload result is returned as the `photo`
+    field in the JSON response with HTTP status `200`.
+  </Step>
+</Steps>
+
+## Required Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CLOUDFLARE_ID` | Your Cloudflare account ID |
+| `CLOUDFLARE_API_KEY` | Cloudflare API token with Workers AI permissions |
+| `CLOUDINARY_CLOUD_NAME` | Your Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | Cloudinary API key |
+| `CLOUDINARY_API_SECRET` | Cloudinary API secret |
+
+## Route Handler Source
+
+```ts
+import cloudinary from "@/lib/cloudinary";
+import axios from "axios";
+import { NextRequest, NextResponse } from "next/server";
+
+export async function POST(request: NextRequest) {
+  try {
+    const { prompt }: { prompt: string } = await request.json();
+    const CLOUDFLARE_ID = process.env.CLOUDFLARE_ID;
+    const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_KEY;
+    const response = await axios.post(
+      `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+      { prompt },
+      {
+        headers: {
+          Authorization: `Bearer ${CLOUDFLARE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!response.data.success) {
+      return NextResponse.json(
+        { error: "Cloudflare API returned an error" },
+        { status: 500 }
+      );
+    }
+
+    const base64Image = response.data.result.image;
+    const photoUrl = await cloudinary.uploader.upload(
+      `data:image/png;base64,${base64Image}`
+    );
+    return NextResponse.json(
+      {
+        photo: photoUrl.secure_url,
+      },
+      {
+        status: 200,
+      }
+    );
+  } catch (error) {
+    console.error("Error generating image:", error);
+
+    return NextResponse.json(
+      { error: "Failed to generate image" },
+      { status: 500 }
+    );
+  }
+}
+```

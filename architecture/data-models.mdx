@@ -1,0 +1,180 @@
+---
+title: "MongoDB Data Models: Users and Posts"
+sidebarTitle: "Data Models"
+description: "Schema definitions, TypeScript interfaces, and connection pooling details for the two MongoDB collections powering Akari Art — users and posts."
+---
+
+Akari Art persists all application data in MongoDB Atlas through two Mongoose models: `User` (created under `model/user.ts`) and `Post` (created under `model/post.ts`). Both files export a Mongoose `Model` using the `mongoose.models.Model || mongoose.model(...)` pattern to avoid model re-registration across hot-reloads and serverless cold-starts. TypeScript interfaces extend Mongoose's `Document` type so every model instance is fully typed throughout the codebase.
+
+## User Model
+
+The `IUser` interface and `UserSchema` are defined in `model/user.ts`:
+
+```ts
+import mongoose, { Schema, Document, Model } from "mongoose";
+
+// Define an interface representing a document in MongoDB
+export interface IUser extends Document {
+  _id: mongoose.Types.ObjectId;
+  name: string;
+  email: string;
+  image?: string;
+  emailVerified?: Date | null;
+  provider?: "google" | "email";
+}
+
+// Define the Schema
+const UserSchema: Schema = new Schema(
+  {
+    name: { type: String },
+    email: { type: String, required: true, unique: true },
+    image: { type: String },
+    emailVerified: { type: Date },
+    provider: { type: String, enum: ["google", "email"] },
+  },
+  { timestamps: true }
+);
+
+// Export the model
+const User: Model<IUser> =
+  mongoose.models.User || mongoose.model<IUser>("User", UserSchema);
+export default User;
+```
+
+### User Field Reference
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `_id` | `ObjectId` | Auto | MongoDB-generated document identifier |
+| `name` | `String` | No | Display name pulled from Google profile |
+| `email` | `String` | **Yes** | Must be unique across the collection |
+| `image` | `String` | No | Avatar URL sourced from Google OAuth profile |
+| `emailVerified` | `Date \| null` | No | Populated by NextAuth adapter conventions |
+| `provider` | `"google" \| "email"` | No | OAuth provider used at sign-up |
+| `createdAt` | `Date` | Auto | Injected by Mongoose `timestamps: true` |
+| `updatedAt` | `Date` | Auto | Injected by Mongoose `timestamps: true` |
+
+<Note>
+  A user document is created automatically on the **first successful Google sign-in**. The `signIn` callback in `lib/auth.ts` calls `User.findOne({ email: user.email })` and, if no record exists, runs `User.create({ name, email, image, provider })`. Subsequent sign-ins with the same email skip creation entirely.
+</Note>
+
+## Post Model
+
+The `IPost` interface and `PostSchema` are defined in `model/post.ts`:
+
+```ts
+import mongoose, { Schema, Document, Model } from "mongoose";
+
+// Define an interface representing a document in MongoDB
+export interface IPost extends Document {
+  _id: mongoose.Types.ObjectId;
+  name: string;
+  prompt: string;
+  photo: string;
+}
+
+// Define the Schema
+const PostSchema: Schema<IPost> = new Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  prompt: {
+    type: String,
+    required: true,
+  },
+  photo: {
+    type: String,
+    required: true,
+  },
+});
+
+// Export the model
+const Post: Model<IPost> =
+  mongoose.models.Post || mongoose.model<IPost>("Post", PostSchema);
+export default Post;
+```
+
+### Post Field Reference
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `_id` | `ObjectId` | Auto | MongoDB-generated document identifier |
+| `name` | `String` | **Yes** | Author's display name, trimmed before save |
+| `prompt` | `String` | **Yes** | The text prompt used to generate the image, trimmed before save |
+| `photo` | `String` | **Yes** | Cloudinary `secure_url` — always an `https://res.cloudinary.com/...` URL |
+
+<Note>
+  The `photo` field is **always** a `res.cloudinary.com` URL. Raw base64 image data from Cloudflare Workers AI is never stored in MongoDB — it is uploaded to Cloudinary inside `app/api/image-generation/route.ts` first, and only the resulting `secure_url` is written to the `posts` collection.
+</Note>
+
+## Database Connection
+
+`lib/database.ts` implements a global connection-caching pattern designed for Next.js serverless deployments:
+
+```ts
+import mongoose from "mongoose";
+
+const MONGODB_URI = process.env.MONGODB_URL!;
+
+if (!MONGODB_URI) {
+  throw new Error("Please define mongo_uri in env variables");
+}
+
+let cached = global.mongoose;
+
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
+
+export async function dbConnect() {
+  if (cached.conn) {
+    return cached.conn;
+  }
+
+  if (!cached.promise) {
+    const opts = {
+      bufferCommands: true,
+      maxPoolSize: 10,
+    };
+
+    mongoose.connect(MONGODB_URI, opts).then(() => mongoose.connection);
+  }
+
+  try {
+    cached.conn = await cached.promise;
+  } catch (error) {
+    cached.promise = null;
+    throw error;
+  }
+
+  return cached.conn;
+}
+```
+
+The global cache object is typed in `types.d.ts`:
+
+```ts
+import { Connection } from "mongoose";
+
+declare global {
+  var mongoose: {
+    conn: Connection | null;
+    promise: Promise<Connection> | null;
+  };
+}
+```
+
+### How Connection Caching Works
+
+On the **first invocation** of `dbConnect()`, `cached.conn` is `null` so Mongoose initiates a new connection. The pending `Promise` is stored in `cached.promise` and the resolved `Connection` in `cached.conn`. On every **subsequent invocation** within the same Node.js process (i.e., warm serverless function), `cached.conn` is already populated and the function returns immediately — no new connection is opened.
+
+`maxPoolSize: 10` limits how many concurrent socket connections the Mongoose driver maintains inside a single process. This prevents connection exhaustion on MongoDB Atlas's free or shared tiers when multiple Route Handlers execute concurrently.
+
+<Warning>
+  `MONGODB_URL` must be set in your environment variables. If the variable is absent at startup, `lib/database.ts` throws immediately:
+  ```
+  Error: Please define mongo_uri in env variables
+  ```
+  Set it in `.env.local` for local development or in your deployment platform's environment configuration for production.
+</Warning>

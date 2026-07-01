@@ -1,0 +1,279 @@
+---
+title: "POST and GET /api/post — Community Posts"
+sidebarTitle: "Posts"
+description: "Fetch all community-shared AI-generated posts or create a new post by saving a name, prompt, and Cloudinary image URL to MongoDB via the /api/post route."
+---
+
+The `/api/post` route handles reading and writing community posts in Akari Art. Posts are MongoDB documents that store the author's display name, the text prompt used to generate the image, and the resulting Cloudinary image URL. Both the `GET` and `POST` handlers connect to MongoDB via `dbConnect()` before executing any queries.
+
+## GET /api/post — List All Posts
+
+Retrieves all community posts from the MongoDB `posts` collection. This endpoint is used to populate the community gallery.
+
+### Endpoint
+
+```
+GET /api/post
+```
+
+### Authentication
+
+No session cookie is required to **read** posts. The endpoint is accessible from server components and server-side data fetching calls without any credentials.
+
+### Request Body
+
+None.
+
+### Response
+
+#### 200 — Success
+
+<ResponseField name="success" type="boolean">
+  Always `true` on a successful response.
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  An array of Post objects from the MongoDB collection. Each object contains:
+
+  <Expandable title="Post object fields">
+    <ResponseField name="_id" type="string">
+      The MongoDB ObjectId of the post as a string.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      The display name of the author who created the post.
+    </ResponseField>
+    <ResponseField name="prompt" type="string">
+      The text prompt that was used to generate the image.
+    </ResponseField>
+    <ResponseField name="photo" type="string">
+      The Cloudinary `secure_url` of the generated image.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### 500 — Error
+
+<ResponseField name="success" type="boolean">
+  Always `false` on error.
+</ResponseField>
+<ResponseField name="message" type="string">
+  `"Failed to fetch posts."`
+</ResponseField>
+<ResponseField name="error" type="string">
+  The underlying error message from the caught exception.
+</ResponseField>
+
+### Example Request
+
+```js
+const response = await fetch('/api/post');
+const data = await response.json();
+
+if (data.success) {
+  console.log(data.data); // Array of post objects
+}
+```
+
+---
+
+## POST /api/post — Create a Post
+
+Creates a new community post in MongoDB. This is called after a user successfully generates an image and chooses to share it with the community.
+
+### Endpoint
+
+```
+POST /api/post
+```
+
+### Authentication
+
+A valid NextAuth.js session cookie is required. The middleware enforces authentication before this handler is reached.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  The author's display name. Leading and trailing whitespace is trimmed before
+  saving to MongoDB.
+
+  **Example:** `"Jane Doe"`
+</ParamField>
+
+<ParamField body="prompt" type="string" required>
+  The text prompt that was used to generate the image. Leading and trailing
+  whitespace is trimmed before saving.
+
+  **Example:** `"A futuristic city skyline at dusk, neon lights reflected in rain"`
+</ParamField>
+
+<ParamField body="photo" type="string" required>
+  The Cloudinary `secure_url` of the generated image, obtained from the
+  `/api/image-generation` response.
+
+  **Example:** `"https://res.cloudinary.com/your-cloud/image/upload/v1234567890/abc123.png"`
+</ParamField>
+
+### Response
+
+#### 201 — Created
+
+<ResponseField name="success" type="boolean">
+  Always `true` on successful creation.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The newly created MongoDB Post document, including the auto-generated `_id`.
+
+  <Expandable title="Post object fields">
+    <ResponseField name="_id" type="string">
+      The MongoDB ObjectId assigned to this post.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      The trimmed author display name.
+    </ResponseField>
+    <ResponseField name="prompt" type="string">
+      The trimmed text prompt.
+    </ResponseField>
+    <ResponseField name="photo" type="string">
+      The Cloudinary image URL.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### 400 — Missing Fields
+
+<ResponseField name="success" type="boolean">
+  Always `false`.
+</ResponseField>
+<ResponseField name="message" type="string">
+  `"Missing required fields: name, prompt, or photo."` — returned when any of
+  the three required body fields is absent or falsy.
+</ResponseField>
+
+#### 500 — Server Error
+
+<ResponseField name="success" type="boolean">
+  Always `false`.
+</ResponseField>
+<ResponseField name="message" type="string">
+  `"Failed to create post."`
+</ResponseField>
+<ResponseField name="error" type="string">
+  The underlying error message from the caught exception.
+</ResponseField>
+
+### Example Request
+
+```js
+const response = await fetch('/api/post', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    name: 'Jane Doe',
+    prompt: 'A futuristic city skyline at dusk, neon lights reflected in rain',
+    photo: 'https://res.cloudinary.com/your-cloud/image/upload/v1234567890/abc123.png',
+  }),
+});
+const data = await response.json();
+
+if (data.success) {
+  console.log(data.data._id); // MongoDB ObjectId of the new post
+}
+```
+
+## MongoDB Post Schema
+
+The `Post` model is defined in `model/post.ts`:
+
+```ts
+import mongoose, { Schema, Document, Model } from "mongoose";
+
+export interface IPost extends Document {
+  _id: mongoose.Types.ObjectId;
+  name: string;
+  prompt: string;
+  photo: string;
+}
+
+const PostSchema: Schema<IPost> = new Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  prompt: {
+    type: String,
+    required: true,
+  },
+  photo: {
+    type: String,
+    required: true,
+  },
+});
+
+const Post: Model<IPost> =
+  mongoose.models.Post || mongoose.model<IPost>("Post", PostSchema);
+export default Post;
+```
+
+## Route Handler Source
+
+```ts
+import { dbConnect } from "@/lib/database";
+import Post from "@/model/post";
+import { NextRequest, NextResponse } from "next/server";
+
+// GET all posts
+export async function GET() {
+  try {
+    await dbConnect();
+    const posts = await Post.find({}).lean();
+    return NextResponse.json({ success: true, data: posts }, { status: 200 });
+  } catch (error) {
+    console.error("GET Error:", error);
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Failed to fetch posts.",
+        error: (error as Error).message,
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// CREATE a post
+export async function POST(request: NextRequest) {
+  try {
+    await dbConnect();
+    const { name, prompt, photo } = await request.json();
+
+    if (!name || !prompt || !photo) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Missing required fields: name, prompt, or photo.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const newPost = await Post.create({
+      name: name.trim(),
+      prompt: prompt.trim(),
+      photo,
+    });
+
+    return NextResponse.json({ success: true, data: newPost }, { status: 201 });
+  } catch (error) {
+    console.error("POST Error:", error);
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Failed to create post.",
+        error: (error as Error).message,
+      },
+      { status: 500 }
+    );
+  }
+}
+```
