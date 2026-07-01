@@ -1,7 +1,7 @@
 ---
-title: "Configure Akari Art Environment Variables"
+title: "Environment Variables Setup for Akari Art Services"
 sidebarTitle: "Environment Setup"
-description: "Step-by-step instructions for obtaining and configuring credentials for Google OAuth, MongoDB, Cloudinary, Cloudflare Workers AI, and NextAuth.js."
+description: "Step-by-step instructions for obtaining and configuring all 11 credentials for Google OAuth, MongoDB, Cloudinary, Cloudflare Workers AI, and NextAuth.js."
 ---
 
 Akari Art connects to five external services — Google OAuth, MongoDB, Cloudinary, Cloudflare Workers AI, and NextAuth.js session management — each of which requires its own set of credentials. None of these values are bundled with the source code; they are read exclusively from environment variables at runtime. This page explains exactly where to find or generate each credential and how to place it in your `.env.local` file.
@@ -12,7 +12,7 @@ Akari Art connects to five external services — Google OAuth, MongoDB, Cloudina
   NextAuth.js uses these credentials to authenticate users via Google's OAuth 2.0 flow. On successful sign-in, user information (name, email, profile image) is stored in MongoDB.
 
   1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create a new project (or select an existing one).
-  2. In the left sidebar, navigate to **APIs & Services → Library**. Search for **Google+ API** and enable it.
+  2. Go to **APIs & Services → OAuth consent screen**, choose **External**, and fill in the required app name and support email fields. Save and continue through each section.
   3. Go to **APIs & Services → Credentials** and click **+ Create Credentials → OAuth 2.0 Client ID**.
   4. Set the **Application type** to **Web application**.
   5. Under **Authorized redirect URIs**, add:

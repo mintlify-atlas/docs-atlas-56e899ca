@@ -1,7 +1,7 @@
 ---
-title: "Akari Art: AI Image Generation for Everyone"
+title: "Akari Art — AI-Powered Image Generation Platform"
 sidebarTitle: "Introduction"
-description: "Akari Art turns text prompts into images via Cloudflare's Flux-1-Schnell model, stores results in Cloudinary, and displays them in a community gallery."
+description: "Akari Art turns text prompts into images via Cloudflare Workers AI Flux-1-Schnell, stores results in Cloudinary, and shares them in a community gallery."
 ---
 
 Akari Art is a full-stack AI image generation platform built on Next.js 15. Type a text prompt, and Akari Art calls Cloudflare Workers AI's **Flux-1-Schnell** model to produce a high-quality image in seconds. Every generated image is automatically uploaded to Cloudinary, persisted in MongoDB, and made available in a shared community gallery — all behind secure Google OAuth authentication provided by NextAuth.js.
@@ -14,21 +14,21 @@ Whether you are a designer exploring AI-assisted creativity, a developer learnin
   <Card
     title="AI Image Generation"
     icon="wand-magic-sparkles"
-    href="/quickstart"
+    href="/features/image-generation"
   >
     Generate images from natural-language prompts using Cloudflare Workers AI and the Flux-1-Schnell model. Results are returned as base64 and instantly uploaded to Cloudinary.
   </Card>
   <Card
     title="Community Gallery"
     icon="images"
-    href="/quickstart"
+    href="/features/community-gallery"
   >
     Every published image lands in a shared gallery. Browse, explore, and draw inspiration from creations made by the entire community — all served via Cloudinary's CDN.
   </Card>
   <Card
     title="Google Authentication"
     icon="google"
-    href="/environment-setup"
+    href="/features/authentication"
   >
     NextAuth.js v4 handles sign-in and session management with Google OAuth. New users are automatically provisioned in MongoDB on first login — no manual registration needed.
   </Card>

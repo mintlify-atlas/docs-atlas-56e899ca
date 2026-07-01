@@ -1,5 +1,5 @@
 ---
-title: "External Service Integrations in Akari Art"
+title: "External Service Integrations in Akari Art Explained"
 sidebarTitle: "Integrations"
 description: "Configuration, request/response shapes, and code for Cloudflare Workers AI, Cloudinary image hosting, and NextAuth.js Google OAuth used by Akari Art."
 ---
@@ -283,6 +283,8 @@ export default withAuth(
     callbacks: {
       authorized({ req, token }) {
         const { pathname } = req.nextUrl;
+        console.log("The token is ", token);
+        // Allow unauthenticated access to these paths
         if (
           pathname.startsWith("/api/auth/*") ||
           pathname === "/signin" ||
@@ -292,6 +294,8 @@ export default withAuth(
         }
 
         const isAuthorized = !!token;
+        if (!isAuthorized) console.warn(`Unauthorized access to ${pathname}`);
+        console.log("is Authorized : ", isAuthorized);
         return isAuthorized;
       },
     },
@@ -300,6 +304,7 @@ export default withAuth(
 
 export const config = {
   matcher: [
+    // Protect all routes except static files and public assets
     "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
 };

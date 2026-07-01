@@ -1,7 +1,7 @@
 ---
-title: "Community Gallery: Discover Shared AI Art"
+title: "Community Gallery: Browse and Search Shared AI Art"
 sidebarTitle: "Community Gallery"
-description: "Browse, search, and download AI-generated artwork shared by every Akari Art user, displayed in a responsive masonry-style grid with prompt overlays and one-click saving."
+description: "Explore AI-generated artwork from every Akari Art user in a responsive grid. Search by creator name or prompt, and download any image with one click."
 ---
 
 The Community Gallery at `/community` is a shared, living feed of every image that any Akari Art user has chosen to publish. Posts are loaded directly from MongoDB on the server, reversed into newest-first order, and rendered into a responsive grid — no pagination or infinite scroll, just a clean snapshot of the community's creativity. From any card you can read the original prompt, see who created the piece, and save a copy to your device.
@@ -36,10 +36,10 @@ The grid is declared in the community page layout:
 Each `<Card>` shows the Cloudinary-hosted image filling the card area. On top of the image sits an **overlay panel** that reveals the prompt text, the creator's name (with an avatar initial badge), and a download button.
 
 <CardGroup cols={2}>
-  <Card title="Desktop hover" icon="desktop">
-    On screens wider than 768 px, the overlay slides into view whenever the cursor enters the card, using the Tailwind `group-hover:flex` utility. No click is needed.
+  <Card title="Desktop hover" icon="desktop" href="/features/community-gallery">
+    On screens wider than 768 px, the overlay slides into view whenever the cursor enters the card, using the CSS `group-hover:flex` utility. No click is needed.
   </Card>
-  <Card title="Mobile tap" icon="mobile">
+  <Card title="Mobile tap" icon="mobile" href="/features/community-gallery">
     On screens narrower than 768 px, the overlay is toggled by tapping the card. A second tap dismisses it. This is handled by the `toggleOverlay` function, which checks `window.innerWidth` before updating the `showOverlay` state.
   </Card>
 </CardGroup>
@@ -108,7 +108,7 @@ if (search) {
 }
 ```
 
-The filter is **case-insensitive** and matches against both the creator's **name** and the image **prompt**. Partial matches are supported — searching for `"cat"` will match any post whose name or prompt contains that substring anywhere.
+The filter matches against both the creator's **name** and the image **prompt**, with partial substring support. Note that only the stored `name` and `prompt` fields are lowercased before comparison — the search query is compared as-entered. For reliable matching, type your search term in lowercase (e.g. `"cat"` will match any post whose lowercased name or prompt contains that substring).
 
 When a search is active, a result label appears above the grid:
 

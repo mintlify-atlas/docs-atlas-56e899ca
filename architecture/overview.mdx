@@ -1,5 +1,5 @@
 ---
-title: "Akari Art System Architecture Overview"
+title: "Akari Art System Architecture: A Technical Overview"
 sidebarTitle: "Overview"
 description: "A technical walkthrough of Akari Art's layered architecture — Next.js App Router, MongoDB, Cloudflare Workers AI, and Cloudinary working together."
 ---
@@ -9,16 +9,16 @@ Akari Art is a full-stack AI image generation platform built on **Next.js 15** w
 ## Application Layers
 
 <CardGroup cols={2}>
-  <Card title="Frontend — Next.js App Router" icon="browser">
+  <Card title="Frontend — Next.js App Router" icon="browser" href="/architecture/overview">
     Pages live under `app/` and are built with React Server Components where possible. Protected routes (`/create`, `/community`) are gated by `middleware.ts` using `withAuth` from NextAuth.js. Client-interactive surfaces (`ImageGenerator.tsx`, `RenderPosts.tsx`) are isolated into dedicated Client Components.
   </Card>
-  <Card title="API Routes — Next.js Route Handlers" icon="code">
+  <Card title="API Routes — Next.js Route Handlers" icon="code" href="/api/overview">
     Three Route Handler modules power the backend: `app/api/auth/[...nextauth]/route.ts` handles the full OAuth flow, `app/api/image-generation/route.ts` proxies prompts to Cloudflare Workers AI and uploads results to Cloudinary, and `app/api/post/route.ts` provides `GET` (fetch all posts) and `POST` (create a post) operations against MongoDB.
   </Card>
-  <Card title="Database Layer — MongoDB + Mongoose" icon="database">
+  <Card title="Database Layer — MongoDB + Mongoose" icon="database" href="/architecture/data-models">
     MongoDB Atlas stores two collections: `users` and `posts`. Mongoose models (`model/user.ts`, `model/post.ts`) enforce schemas and TypeScript interfaces. The `lib/database.ts` module implements a global connection cache with `maxPoolSize: 10` to safely share a single connection across serverless function invocations.
   </Card>
-  <Card title="External Services — Cloudflare AI + Cloudinary" icon="cloud">
+  <Card title="External Services — Cloudflare AI + Cloudinary" icon="cloud" href="/architecture/integrations">
     User prompts are sent over HTTPS to the Cloudflare Workers AI REST API, which runs the `@cf/black-forest-labs/flux-1-schnell` model and returns a base64-encoded PNG. That PNG is immediately uploaded to Cloudinary via the Node.js SDK, and the resulting `secure_url` is what gets stored and served — never the raw base64 payload.
   </Card>
 </CardGroup>
@@ -63,22 +63,30 @@ Akari-Art/
 │   ├── create/page.tsx
 │   ├── signin/page.tsx
 │   ├── layout.tsx
-│   └── page.tsx
+│   ├── page.tsx
+│   └── providers.tsx
 ├── components/
 │   ├── ui/
-│   ├── ImageGenerator.tsx
-│   ├── RenderPosts.tsx
+│   ├── AvatarWithLogOut.tsx
 │   ├── Card.tsx
+│   ├── Footer.tsx
+│   ├── Hero.tsx
+│   ├── Hexagon.tsx
+│   ├── ImageGenerator.tsx
 │   ├── Navbar.tsx
-│   └── Hero.tsx
+│   ├── RenderPosts.tsx
+│   └── signin-form-demo.tsx
 ├── lib/
 │   ├── auth.ts
 │   ├── cloudinary.ts
-│   └── database.ts
+│   ├── database.ts
+│   └── utils.ts
 ├── model/
 │   ├── post.ts
 │   └── user.ts
-└── middleware.ts
+├── middleware.ts
+├── next-auth.d.ts
+└── types.d.ts
 ```
 
 ## Key Design Decisions

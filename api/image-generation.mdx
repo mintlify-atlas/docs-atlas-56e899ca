@@ -1,5 +1,5 @@
 ---
-title: "POST /api/image-generation — Generate AI Art"
+title: "POST /api/image-generation — AI Image Generation"
 sidebarTitle: "Image Generation"
 description: "Generate AI images from text prompts using Cloudflare Workers AI Flux-1-Schnell model, automatically uploaded to Cloudinary and returned as a secure URL."
 ---
@@ -20,7 +20,7 @@ A valid NextAuth.js session cookie is required. The Next.js middleware automatic
 
 <ParamField body="prompt" type="string" required>
   The text description of the image to generate. Should be descriptive and
-  specific for best results. Minimum 10 characters recommended.
+  specific for best results.
 
   **Example:** `"A purple nebula with glowing stars, digital art style"`
 </ParamField>

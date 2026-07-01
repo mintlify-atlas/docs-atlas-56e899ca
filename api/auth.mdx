@@ -1,7 +1,7 @@
 ---
-title: "NextAuth.js Authentication API Endpoints"
+title: "Akari Art NextAuth.js Authentication API Reference"
 sidebarTitle: "Auth"
-description: "Reference for all NextAuth.js-managed OAuth endpoints in Akari Art, including Google sign-in flow, session retrieval, JWT callbacks, and middleware route protection."
+description: "All NextAuth.js OAuth endpoints in Akari Art: Google sign-in, JWT session with user.id, signIn/jwt/session callbacks, and middleware protection."
 ---
 
 Akari Art's authentication is fully managed by **NextAuth.js**, which registers a catch-all route handler at `app/api/auth/[...nextauth]/route.ts`. You never need to call most of these endpoints directly — NextAuth's client-side helpers (`useSession`, `signIn`, `signOut`) and the Next.js middleware handle the full authentication lifecycle. This page documents the underlying endpoints, session shape, and how to access the session in both client and server contexts.
